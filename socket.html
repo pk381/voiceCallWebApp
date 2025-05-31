@@ -1,0 +1,174 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>WebRTC Voice Call</title>
+</head>
+<body>
+  <h2>WebRTC Call System</h2>
+  <input id="usernameInput" placeholder="Enter your name" />
+  <button onclick="register()">Register</button>
+
+  <h4>Select Microphone:</h4>
+  <select id="audioSelect"></select>
+
+  <h3>Online Users</h3>
+  <ul id="userList"></ul>
+
+  <div id="incomingCall" style="display: none;">
+    <p id="callText"></p>
+    <button onclick="acceptCall()">Accept Call</button>
+  </div>
+
+  <script src="https://cdn.socket.io/4.0.1/socket.io.min.js"></script>
+  <script>
+    const socket = io('http://localhost:3000');
+    let myId = '';
+    let myName = '';
+    let callerId = '';
+
+    let peerConnection;
+    let localStream;
+    const config = { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] };
+
+    window.onload = async () => {
+      await loadAudioDevices();
+    };
+
+    async function loadAudioDevices() {
+      const devices = await navigator.mediaDevices.enumerateDevices();
+      const audioSelect = document.getElementById("audioSelect");
+
+      devices.forEach(device => {
+        if (device.kind === "audioinput") {
+          const option = document.createElement("option");
+          option.value = device.deviceId;
+          option.text = device.label || `Microphone ${audioSelect.length + 1}`;
+          audioSelect.appendChild(option);
+        }
+      });
+    }
+
+    function register() {
+      myName = document.getElementById('usernameInput').value.trim();
+      if (!myName) return alert('Enter a name');
+      socket.emit('register', myName);
+    }
+
+    // Update online user list
+    socket.on('user-list', (users) => {
+      const list = document.getElementById('userList');
+      list.innerHTML = '';
+      users.forEach(user => {
+        if (user.id !== socket.id) {
+          const li = document.createElement('li');
+          li.innerHTML = `${user.username} <button onclick="callUser('${user.id}')">Call</button>`;
+          list.appendChild(li);
+        }
+      });
+    });
+
+    // Outgoing call
+    async function callUser(targetId) {
+      await prepareStream();
+      callerId = targetId;
+      socket.emit('call-user', { to: targetId, from: socket.id });
+    }
+
+    // Incoming call
+    socket.on('incoming-call', async ({ from, fromName }) => {
+      callerId = from;
+      document.getElementById('incomingCall').style.display = 'block';
+      document.getElementById('callText').innerText = `📞 Incoming call from ${fromName}`;
+    });
+
+    // Accept call
+    async function acceptCall() {
+      document.getElementById('incomingCall').style.display = 'none';
+      await prepareStream();
+      socket.emit('accept-call', { to: callerId, from: socket.id });
+    }
+
+    // Call accepted → setup peer and send offer
+    socket.on('call-accepted', async () => {
+      await createPeer(true);
+    });
+
+    // Handle signaling
+    socket.on('signal', async ({ from, data }) => {
+      if (!peerConnection) await createPeer(false);
+      if (data.type === 'offer') {
+        await peerConnection.setRemoteDescription(new RTCSessionDescription(data));
+        const answer = await peerConnection.createAnswer();
+        await peerConnection.setLocalDescription(answer);
+        socket.emit('signal', { to: from, data: answer });
+      } else if (data.type === 'answer') {
+        await peerConnection.setRemoteDescription(new RTCSessionDescription(data));
+      } else if (data.candidate) {
+        await peerConnection.addIceCandidate(new RTCIceCandidate(data));
+      }
+    });
+
+    // Setup WebRTC
+    async function prepareStream() {
+      const selectedDeviceId = document.getElementById("audioSelect").value;
+
+      localStream = await navigator.mediaDevices.getUserMedia({
+        audio: {
+          deviceId: selectedDeviceId ? { exact: selectedDeviceId } : undefined
+        }
+      });
+
+      console.log("Using audio device:", selectedDeviceId);
+      detectSpeaking(localStream);
+    }
+
+    async function createPeer(isCaller) {
+      peerConnection = new RTCPeerConnection(config);
+      localStream.getTracks().forEach(track => {
+        peerConnection.addTrack(track, localStream);
+      });
+
+      peerConnection.onicecandidate = ({ candidate }) => {
+        if (candidate) {
+          socket.emit('signal', { to: callerId, data: candidate });
+        }
+      };
+
+      peerConnection.ontrack = (event) => {
+        const remoteStream = event.streams[0];
+        console.log("Received remote stream:", remoteStream);
+
+        const audio = new Audio();
+        audio.srcObject = remoteStream;
+        audio.autoplay = true;
+        audio.play().catch(e => console.error("Audio play error:", e));
+      };
+
+      if (isCaller) {
+        const offer = await peerConnection.createOffer();
+        await peerConnection.setLocalDescription(offer);
+        socket.emit('signal', { to: callerId, data: offer });
+      }
+    }
+
+    // Optional: log when user speaks (basic speech detection)
+    function detectSpeaking(stream) {
+      const ctx = new (window.AudioContext || window.webkitAudioContext)();
+      const source = ctx.createMediaStreamSource(stream);
+      const analyser = ctx.createAnalyser();
+      source.connect(analyser);
+      const data = new Uint8Array(analyser.frequencyBinCount);
+
+      function checkVolume() {
+        analyser.getByteFrequencyData(data);
+        const volume = data.reduce((a, b) => a + b) / data.length;
+        if (volume > 10) {
+          console.log("🎙 User is speaking...");
+        }
+        requestAnimationFrame(checkVolume);
+      }
+      checkVolume();
+    }
+  </script>
+</body>
+</html>
