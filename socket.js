@@ -13,7 +13,7 @@ app.use(cors());
 
 const io = socketIO(server, {
   cors: {
-    origin: "*", // change in production
+    origin: "https://voicecallwebapp.onrender.com", // change in production
     methods: ["GET", "POST"]
   }
 });

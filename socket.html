@@ -21,7 +21,7 @@
 
   <script src="https://cdn.socket.io/4.0.1/socket.io.min.js"></script>
   <script>
-    const socket = io('http://localhost:3000');
+    const socket = io(window.location.origin);
     let myId = '';
     let myName = '';
     let callerId = '';
