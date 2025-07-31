@@ -13,14 +13,16 @@ app.use(cors());
 
 const io = socketIO(server, {
   cors: {
-    origin: "https://voicecallwebapp.onrender.com", // change in production
+    origin: ["https://voicecallwebapp.onrender.com", "capacitor://localhost"], 
     methods: ["GET", "POST"]
   }
 });
 
+// Serve static HTML (if any)
 app.get('/', (req, res) => {
   res.sendFile(path.join(__dirname, '', 'socket.html'));
 });
+
 // In-memory user map: { socket.id: username }
 const users = {};
 
@@ -48,7 +50,14 @@ io.on('connection', (socket) => {
 
   // Handle signaling (offer/answer/candidates)
   socket.on('signal', ({ to, data }) => {
+    console.log(`📶 Signal from ${socket.id} to ${to}: ${data?.type || 'ICE'}`);
     io.to(to).emit('signal', { from: socket.id, data });
+  });
+
+  // Handle call ended
+  socket.on('call-ended', ({ to }) => {
+    console.log(`🔚 Call ended by ${socket.id}`);
+    io.to(to).emit('call-ended', { from: socket.id });
   });
 
   // Handle disconnect
