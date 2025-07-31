@@ -13,7 +13,7 @@ app.use(cors());
 
 const io = socketIO(server, {
   cors: {
-    origin: ["https://voicecallwebapp.onrender.com", "capacitor://localhost"], 
+    origin: ["https://voicecallwebapp.onrender.com", "*"], 
     methods: ["GET", "POST"]
   }
 });
